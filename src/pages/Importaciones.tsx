@@ -12,19 +12,26 @@ export default function Importaciones() {
   const [items, setItems] = useState<ImportacionItem[]>([])
   const [saving, setSaving] = useState(false)
   const [capitalizing, setCapitalizing] = useState(false)
-  
-  // 👇 NUEVOS ESTADOS PARA EDICIÓN
+
   const [editModal, setEditModal] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ notas: '', estado: 'pendiente' })
 
+  // Todos los campos numéricos del lote como string para evitar el bug del 0
   const [loteForm, setLoteForm] = useState({
-    numero_lote: '', fecha: new Date().toISOString().split('T')[0],
-    tipo_cambio: 6.96, flete_usd: 0, seguro_usd: 0,
-    dat_porcentaje: 10, despachante_bs: 0, otros_gastos_bs: 0, notas: ''
+    numero_lote: '',
+    fecha: new Date().toISOString().split('T')[0],
+    notas: ''
   })
+  const [tipoCambioStr, setTipoCambioStr] = useState('6.96')
+  const [fleteStr, setFleteStr] = useState('')
+  const [seguroStr, setSeguroStr] = useState('')
+  const [datStr, setDatStr] = useState('10')
+  const [despachanteStr, setDespachanteStr] = useState('')
+  const [otrosStr, setOtrosStr] = useState('')
 
-  const [itemsForm, setItemsForm] = useState<{ producto_id: string; cantidad: number; costo_unitario_usd: number }[]>([])
+  // Items con campos numéricos también como string
+  const [itemsForm, setItemsForm] = useState<{ producto_id: string; cantidadStr: string; costoStr: string }[]>([])
 
   useEffect(() => { load() }, [])
 
@@ -39,15 +46,43 @@ export default function Importaciones() {
     setLoading(false)
   }
 
+  function numStr(s: string) { return parseFloat(s) || 0 }
+
   function calcularCostos() {
-    const tc = loteForm.tipo_cambio
-    const fleteBS = loteForm.flete_usd * tc
-    const seguroBS = loteForm.seguro_usd * tc
-    const totalProductosUSD = itemsForm.reduce((s, i) => s + i.cantidad * i.costo_unitario_usd, 0)
-    const datBS = totalProductosUSD * tc * (loteForm.dat_porcentaje / 100)
-    const totalGastosBS = fleteBS + seguroBS + datBS + loteForm.despachante_bs + loteForm.otros_gastos_bs
+    const tc = numStr(tipoCambioStr)
+    const fleteBS = numStr(fleteStr) * tc
+    const seguroBS = numStr(seguroStr) * tc
+    const totalProductosUSD = itemsForm.reduce((s, i) => s + numStr(i.cantidadStr) * numStr(i.costoStr), 0)
+    const datBS = totalProductosUSD * tc * (numStr(datStr) / 100)
+    const totalGastosBS = fleteBS + seguroBS + datBS + numStr(despachanteStr) + numStr(otrosStr)
     const totalProductosBS = totalProductosUSD * tc
     return { totalProductosUSD, totalProductosBS, datBS, totalGastosBS, total: totalProductosBS + totalGastosBS }
+  }
+
+  function numInput(value: string, onChange: (v: string) => void, placeholder = '0', extraClass = '') {
+    return (
+      <input
+        value={value}
+        onChange={e => {
+          const val = e.target.value
+          if (val === '' || /^\d*\.?\d*$/.test(val)) onChange(val)
+        }}
+        placeholder={placeholder}
+        inputMode="decimal"
+        className={`w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 ${extraClass}`}
+      />
+    )
+  }
+
+  function resetLote() {
+    setLoteForm({ numero_lote: '', fecha: new Date().toISOString().split('T')[0], notas: '' })
+    setTipoCambioStr('6.96')
+    setFleteStr('')
+    setSeguroStr('')
+    setDatStr('10')
+    setDespachanteStr('')
+    setOtrosStr('')
+    setItemsForm([])
   }
 
   async function crearLote() {
@@ -56,23 +91,33 @@ export default function Importaciones() {
     try {
       const calc = calcularCostos()
       const { data: imp, error } = await supabase.from('importaciones').insert({
-        ...loteForm,
+        numero_lote: loteForm.numero_lote,
+        fecha: loteForm.fecha,
+        notas: loteForm.notas,
+        tipo_cambio: numStr(tipoCambioStr),
+        flete_usd: numStr(fleteStr),
+        seguro_usd: numStr(seguroStr),
+        dat_porcentaje: numStr(datStr),
+        despachante_bs: numStr(despachanteStr),
+        otros_gastos_bs: numStr(otrosStr),
         costo_total_bs: calc.total,
         estado: 'pendiente'
       }).select().single()
       if (error) throw error
 
       const itemsData = itemsForm.map(item => {
-        const subtotalUSD = item.cantidad * item.costo_unitario_usd
-        const subtotalBS = subtotalUSD * loteForm.tipo_cambio
+        const cantidad = numStr(item.cantidadStr)
+        const costoUSD = numStr(item.costoStr)
+        const subtotalUSD = cantidad * costoUSD
+        const subtotalBS = subtotalUSD * numStr(tipoCambioStr)
         const proporcion = calc.totalProductosUSD > 0 ? subtotalUSD / calc.totalProductosUSD : 0
         const gastosProrrateadosBS = calc.totalGastosBS * proporcion
-        const costoUnitarioBSReal = item.cantidad > 0 ? (subtotalBS + gastosProrrateadosBS) / item.cantidad : 0
+        const costoUnitarioBSReal = cantidad > 0 ? (subtotalBS + gastosProrrateadosBS) / cantidad : 0
         return {
           importacion_id: imp.id,
           producto_id: item.producto_id,
-          cantidad: item.cantidad,
-          costo_unitario_usd: item.costo_unitario_usd,
+          cantidad,
+          costo_unitario_usd: costoUSD,
           costo_unitario_bs_real: costoUnitarioBSReal
         }
       })
@@ -80,8 +125,7 @@ export default function Importaciones() {
       await supabase.from('importacion_items').insert(itemsData)
       alert('✅ Lote creado exitosamente')
       setModalLote(false)
-      setItemsForm([])
-      setLoteForm({ numero_lote: '', fecha: new Date().toISOString().split('T')[0], tipo_cambio: 6.96, flete_usd: 0, seguro_usd: 0, dat_porcentaje: 10, despachante_bs: 0, otros_gastos_bs: 0, notas: '' })
+      resetLote()
       load()
     } catch (e: any) { alert('Error: ' + e.message) }
     setSaving(false)
@@ -109,29 +153,20 @@ export default function Importaciones() {
     setCapitalizing(false)
   }
 
-  // 👇 FUNCIÓN: ABRIR EDICIÓN
   function abrirEditar(imp: Importacion) {
-    setEditId((imp as any).identificacion || imp.id)
-    setEditForm({
-      notas: imp.notas || '',
-      estado: imp.estado
-    })
+    setEditId(imp.id)
+    setEditForm({ notas: imp.notas || '', estado: imp.estado })
     setEditModal(true)
   }
 
-  // 👇 FUNCIÓN: GUARDAR EDICIÓN (solo notas y estado)
   async function guardarEdicion() {
     if (!editId) return alert('Error: No hay lote seleccionado')
-    
     try {
-      await supabase
+      const { error } = await supabase
         .from('importaciones')
-        .update({ 
-          notas: editForm.notas,
-          estado: editForm.estado
-        })
-        .eq('identificacion', editId)
-      
+        .update({ notas: editForm.notas, estado: editForm.estado })
+        .eq('id', editId)
+      if (error) throw error
       alert('✅ Lote actualizado')
       setEditModal(false)
       setEditId(null)
@@ -141,24 +176,15 @@ export default function Importaciones() {
     }
   }
 
-  // 👇 FUNCIÓN: ELIMINAR LOTE (SOLO si no está capitalizado)
-  async function handleEliminarImportacion(id: string) {
-    // Primero verificar si está capitalizado
-    const { data: imp } = await supabase.from('importaciones').select('estado').eq('identificacion', id).single()
-    
-    if ((imp as any)?.estado === 'capitalizado') {
+  async function handleEliminarImportacion(imp: Importacion) {
+    if (imp.estado === 'capitalizado') {
       return alert('⚠️ No se puede eliminar un lote ya capitalizado.\n\nEste lote ya actualizó el stock y costos de tus productos. Eliminarlo dejaría tu inventario inconsistente.\n\nSi necesitas corregir algo, haz un ajuste manual en Inventario.')
     }
-    
     if (!confirm('¿Estás seguro de eliminar este lote?\n\nSe eliminarán también todos los productos asociados a este lote.')) return
-    
     try {
-      // 1. Eliminar items del lote primero (por clave foránea)
-      await supabase.from('importacion_items').delete().eq('importacion_id', id)
-      
-      // 2. Eliminar el lote
-      await supabase.from('importaciones').delete().eq('identificacion', id)
-      
+      await supabase.from('importacion_items').delete().eq('importacion_id', imp.id)
+      const { error } = await supabase.from('importaciones').delete().eq('id', imp.id)
+      if (error) throw error
       alert('✅ Lote eliminado')
       load()
     } catch (e: any) {
@@ -201,7 +227,6 @@ export default function Importaciones() {
               </div>
             </div>
 
-            {/* Items */}
             {(imp.importacion_items || []).length > 0 && (
               <div className="mt-3 border-t border-gray-50 pt-3">
                 <div className="grid grid-cols-3 gap-2">
@@ -227,23 +252,9 @@ export default function Importaciones() {
                   {capitalizing ? 'Capitalizando...' : '✓ Capitalizar (Actualizar Stock)'}
                 </button>
               )}
-              
-              {/* 👇 BOTONES DE ACCIÓN: Editar y Eliminar */}
               <div className="ml-auto flex items-center gap-2">
-                <button 
-                  onClick={() => abrirEditar(imp)}
-                  className="text-blue-500 hover:text-blue-700 text-xs"
-                  title="Editar notas/estado"
-                >
-                  ✏️
-                </button>
-                <button 
-                  onClick={() => handleEliminarImportacion((imp as any).identificacion || imp.id)}
-                  className="text-red-400 hover:text-red-600 text-xs"
-                  title="Eliminar lote"
-                >
-                  🗑️
-                </button>
+                <button onClick={() => abrirEditar(imp)} className="text-blue-500 hover:text-blue-700 text-xs" title="Editar notas/estado">✏️</button>
+                <button onClick={() => handleEliminarImportacion(imp)} className="text-red-400 hover:text-red-600 text-xs" title="Eliminar lote">🗑️</button>
               </div>
             </div>
           </div>
@@ -258,7 +269,6 @@ export default function Importaciones() {
               <h2 className="text-lg font-bold text-gray-900">Nuevo Lote de Importación</h2>
             </div>
             <div className="p-6 space-y-6">
-              {/* Info lote */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Número de Lote *</label>
@@ -272,41 +282,42 @@ export default function Importaciones() {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Tipo de Cambio (USD→Bs)</label>
-                  <input type="number" step="0.01" value={loteForm.tipo_cambio} onChange={e => setLoteForm({ ...loteForm, tipo_cambio: Number(e.target.value) })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {numInput(tipoCambioStr, setTipoCambioStr, '6.96')}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">DAT / Arancel (%)</label>
-                  <input type="number" step="0.1" value={loteForm.dat_porcentaje} onChange={e => setLoteForm({ ...loteForm, dat_porcentaje: Number(e.target.value) })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {numInput(datStr, setDatStr, '10')}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Flete (USD)</label>
-                  <input type="number" value={loteForm.flete_usd} onChange={e => setLoteForm({ ...loteForm, flete_usd: Number(e.target.value) })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {numInput(fleteStr, setFleteStr, '0')}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Seguro (USD)</label>
-                  <input type="number" value={loteForm.seguro_usd} onChange={e => setLoteForm({ ...loteForm, seguro_usd: Number(e.target.value) })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {numInput(seguroStr, setSeguroStr, '0')}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Despachante (Bs)</label>
-                  <input type="number" value={loteForm.despachante_bs} onChange={e => setLoteForm({ ...loteForm, despachante_bs: Number(e.target.value) })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {numInput(despachanteStr, setDespachanteStr, '0')}
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Otros Gastos (Bs)</label>
-                  <input type="number" value={loteForm.otros_gastos_bs} onChange={e => setLoteForm({ ...loteForm, otros_gastos_bs: Number(e.target.value) })}
-                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  {numInput(otrosStr, setOtrosStr, '0')}
                 </div>
+              </div>
+
+              {/* Notas */}
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Notas</label>
+                <textarea value={loteForm.notas} onChange={e => setLoteForm({ ...loteForm, notas: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={2} />
               </div>
 
               {/* Productos del lote */}
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="font-semibold text-gray-800">Productos del Lote</h3>
-                  <button onClick={() => setItemsForm([...itemsForm, { producto_id: productos[0]?.id || '', cantidad: 1, costo_unitario_usd: 0 }])}
+                  <button onClick={() => setItemsForm([...itemsForm, { producto_id: productos[0]?.id || '', cantidadStr: '', costoStr: '' }])}
                     className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition">+ Agregar Producto</button>
                 </div>
                 <div className="space-y-2">
@@ -321,13 +332,33 @@ export default function Importaciones() {
                       </div>
                       <div className="w-24">
                         <label className="text-xs text-gray-500 block mb-1">Cantidad</label>
-                        <input type="number" value={item.cantidad} onChange={e => { const n = [...itemsForm]; n[i].cantidad = Number(e.target.value); setItemsForm(n) }}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <input
+                          value={item.cantidadStr}
+                          onChange={e => {
+                            const val = e.target.value
+                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                              const n = [...itemsForm]; n[i].cantidadStr = val; setItemsForm(n)
+                            }
+                          }}
+                          placeholder="0"
+                          inputMode="decimal"
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
                       </div>
                       <div className="w-28">
                         <label className="text-xs text-gray-500 block mb-1">Costo USD</label>
-                        <input type="number" step="0.01" value={item.costo_unitario_usd} onChange={e => { const n = [...itemsForm]; n[i].costo_unitario_usd = Number(e.target.value); setItemsForm(n) }}
-                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        <input
+                          value={item.costoStr}
+                          onChange={e => {
+                            const val = e.target.value
+                            if (val === '' || /^\d*\.?\d*$/.test(val)) {
+                              const n = [...itemsForm]; n[i].costoStr = val; setItemsForm(n)
+                            }
+                          }}
+                          placeholder="0.00"
+                          inputMode="decimal"
+                          className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
                       </div>
                       <button onClick={() => setItemsForm(itemsForm.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 pb-2">✕</button>
                     </div>
@@ -350,7 +381,7 @@ export default function Importaciones() {
               )}
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
-              <button onClick={() => setModalLote(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
+              <button onClick={() => { setModalLote(false); resetLote() }} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
               <button onClick={crearLote} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
                 {saving ? 'Guardando...' : 'Crear Lote'}
               </button>
@@ -359,7 +390,7 @@ export default function Importaciones() {
         </div>
       )}
 
-      {/* 👇 MODAL DE EDICIÓN */}
+      {/* Modal de edición */}
       {editModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -369,11 +400,8 @@ export default function Importaciones() {
             <div className="p-6 space-y-4">
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Estado</label>
-                <select 
-                  value={editForm.estado} 
-                  onChange={e => setEditForm({ ...editForm, estado: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
+                <select value={editForm.estado} onChange={e => setEditForm({ ...editForm, estado: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                   <option value="pendiente">Pendiente</option>
                   <option value="en_transito">En Tránsito</option>
                   <option value="capitalizado">Capitalizado</option>
@@ -381,19 +409,13 @@ export default function Importaciones() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Notas</label>
-                <textarea 
-                  value={editForm.notas} 
-                  onChange={e => setEditForm({ ...editForm, notas: e.target.value })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  rows={3}
-                />
+                <textarea value={editForm.notas} onChange={e => setEditForm({ ...editForm, notas: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" rows={3} />
               </div>
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
               <button onClick={() => setEditModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
-              <button onClick={guardarEdicion} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-                Guardar cambios
-              </button>
+              <button onClick={guardarEdicion} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">Guardar cambios</button>
             </div>
           </div>
         </div>
