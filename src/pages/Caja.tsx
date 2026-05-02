@@ -5,6 +5,12 @@ import type { Cuenta, CajaMovimiento } from '../lib/types'
 
 type FormTipo = 'aporte' | 'egreso' | 'transferencia'
 
+interface FormState {
+  cuenta_id: string
+  cuenta_destino_id: string
+  concepto: string
+}
+
 export default function Caja() {
   const [cuentas, setCuentas] = useState<Cuenta[]>([])
   const [movimientos, setMovimientos] = useState<CajaMovimiento[]>([])
@@ -13,7 +19,8 @@ export default function Caja() {
   const [editModal, setEditModal] = useState(false)
   const [editMovimiento, setEditMovimiento] = useState<CajaMovimiento | null>(null)
   const [tipo, setTipo] = useState<FormTipo>('aporte')
-  const [form, setForm] = useState({ cuenta_id: '', cuenta_destino_id: '', concepto: '', monto: '' })
+  const [form, setForm] = useState<FormState>({ cuenta_id: '', cuenta_destino_id: '', concepto: '' })
+  const [montoStr, setMontoStr] = useState<string>('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { load() }, [])
@@ -31,8 +38,8 @@ export default function Caja() {
   }
 
   async function registrar() {
-    const monto = Number(form.monto)
-    if (!form.cuenta_id || !form.concepto || !monto || isNaN(monto)) return alert('Completa todos los campos')
+    const monto = parseFloat(montoStr)
+    if (!form.cuenta_id || !form.concepto || !montoStr || isNaN(monto) || monto <= 0) return alert('Completa todos los campos')
     if (tipo === 'transferencia' && !form.cuenta_destino_id) return alert('Selecciona cuenta destino')
     setSaving(true)
     try {
@@ -58,7 +65,8 @@ export default function Caja() {
       }
       alert('✅ Registrado correctamente')
       setModal(false)
-      setForm(f => ({ ...f, concepto: '', monto: '' }))
+      setForm(f => ({ ...f, concepto: '' }))
+      setMontoStr('')
       load()
     } catch (e: any) { alert('Error: ' + e.message) }
     setSaving(false)
@@ -70,14 +78,14 @@ export default function Caja() {
       cuenta_id: movimiento.cuenta_id,
       cuenta_destino_id: '',
       concepto: movimiento.concepto,
-      monto: String(movimiento.monto)
     })
+    setMontoStr(String(movimiento.monto))
     setEditModal(true)
   }
 
   async function guardarEdicion() {
-    const monto = Number(form.monto)
-    if (!form.cuenta_id || !form.concepto || !monto || isNaN(monto)) return alert('Completa todos los campos')
+    const monto = parseFloat(montoStr)
+    if (!form.cuenta_id || !form.concepto || !montoStr || isNaN(monto) || monto <= 0) return alert('Completa todos los campos')
     if (!editMovimiento) return alert('No hay movimiento seleccionado')
 
     setSaving(true)
@@ -113,7 +121,8 @@ export default function Caja() {
       alert('✅ Actualizado correctamente')
       setEditModal(false)
       setEditMovimiento(null)
-      setForm(f => ({ ...f, concepto: '', monto: '' }))
+      setForm(f => ({ ...f, concepto: '' }))
+      setMontoStr('')
       load()
     } catch (e: any) {
       alert('Error al actualizar: ' + e.message)
@@ -158,13 +167,12 @@ export default function Caja() {
     transferencia_out: { label: 'Salida', color: 'text-orange-500' },
   }
 
-  // Input de monto reutilizable — maneja string internamente, solo permite dígitos y un punto decimal
   const inputMonto = (
     <input
-      value={form.monto}
+      value={montoStr}
       onChange={e => {
         const val = e.target.value
-        if (val === '' || /^\d*\.?\d*$/.test(val)) setForm({ ...form, monto: val })
+        if (val === '' || /^\d*\.?\d*$/.test(val)) setMontoStr(val)
       }}
       placeholder="0.00"
       inputMode="decimal"
