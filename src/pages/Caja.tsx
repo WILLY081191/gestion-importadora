@@ -87,7 +87,7 @@ export default function Caja() {
           concepto: form.concepto,
           monto: form.monto
         })
-        .eq('identificacion', editId)
+        .eq('identificación', editId)  // 👈 AQUÍ ESTABA EL ERROR (sin tilde)
       
       alert('✅ Actualizado correctamente')
       setEditModal(false)
