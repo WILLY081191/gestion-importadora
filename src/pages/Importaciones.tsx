@@ -12,6 +12,11 @@ export default function Importaciones() {
   const [items, setItems] = useState<ImportacionItem[]>([])
   const [saving, setSaving] = useState(false)
   const [capitalizing, setCapitalizing] = useState(false)
+  
+  // 👇 NUEVOS ESTADOS PARA EDICIÓN
+  const [editModal, setEditModal] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ notas: '', estado: 'pendiente' })
 
   const [loteForm, setLoteForm] = useState({
     numero_lote: '', fecha: new Date().toISOString().split('T')[0],
@@ -104,6 +109,63 @@ export default function Importaciones() {
     setCapitalizing(false)
   }
 
+  // 👇 FUNCIÓN: ABRIR EDICIÓN
+  function abrirEditar(imp: Importacion) {
+    setEditId((imp as any).identificacion || imp.id)
+    setEditForm({
+      notas: imp.notas || '',
+      estado: imp.estado
+    })
+    setEditModal(true)
+  }
+
+  // 👇 FUNCIÓN: GUARDAR EDICIÓN (solo notas y estado)
+  async function guardarEdicion() {
+    if (!editId) return alert('Error: No hay lote seleccionado')
+    
+    try {
+      await supabase
+        .from('importaciones')
+        .update({ 
+          notas: editForm.notas,
+          estado: editForm.estado
+        })
+        .eq('identificacion', editId)
+      
+      alert('✅ Lote actualizado')
+      setEditModal(false)
+      setEditId(null)
+      load()
+    } catch (e: any) {
+      alert('Error: ' + e.message)
+    }
+  }
+
+  // 👇 FUNCIÓN: ELIMINAR LOTE (SOLO si no está capitalizado)
+  async function handleEliminarImportacion(id: string) {
+    // Primero verificar si está capitalizado
+    const { data: imp } = await supabase.from('importaciones').select('estado').eq('identificacion', id).single()
+    
+    if ((imp as any)?.estado === 'capitalizado') {
+      return alert('⚠️ No se puede eliminar un lote ya capitalizado.\n\nEste lote ya actualizó el stock y costos de tus productos. Eliminarlo dejaría tu inventario inconsistente.\n\nSi necesitas corregir algo, haz un ajuste manual en Inventario.')
+    }
+    
+    if (!confirm('¿Estás seguro de eliminar este lote?\n\nSe eliminarán también todos los productos asociados a este lote.')) return
+    
+    try {
+      // 1. Eliminar items del lote primero (por clave foránea)
+      await supabase.from('importacion_items').delete().eq('importacion_id', id)
+      
+      // 2. Eliminar el lote
+      await supabase.from('importaciones').delete().eq('identificacion', id)
+      
+      alert('✅ Lote eliminado')
+      load()
+    } catch (e: any) {
+      alert('Error al eliminar: ' + e.message)
+    }
+  }
+
   const calc = calcularCostos()
 
   const estadoColors: Record<string, string> = {
@@ -154,7 +216,7 @@ export default function Importaciones() {
               </div>
             )}
 
-            <div className="flex gap-2 mt-3">
+            <div className="flex gap-2 mt-3 items-center">
               {imp.estado === 'pendiente' && (
                 <button onClick={() => supabase.from('importaciones').update({ estado: 'en_transito' }).eq('id', imp.id).then(load)}
                   className="text-xs px-3 py-1.5 bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition">Marcar En Tránsito</button>
@@ -165,6 +227,24 @@ export default function Importaciones() {
                   {capitalizing ? 'Capitalizando...' : '✓ Capitalizar (Actualizar Stock)'}
                 </button>
               )}
+              
+              {/* 👇 BOTONES DE ACCIÓN: Editar y Eliminar */}
+              <div className="ml-auto flex items-center gap-2">
+                <button 
+                  onClick={() => abrirEditar(imp)}
+                  className="text-blue-500 hover:text-blue-700 text-xs"
+                  title="Editar notas/estado"
+                >
+                  ✏️
+                </button>
+                <button 
+                  onClick={() => handleEliminarImportacion((imp as any).identificacion || imp.id)}
+                  className="text-red-400 hover:text-red-600 text-xs"
+                  title="Eliminar lote"
+                >
+                  🗑️
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -273,6 +353,46 @@ export default function Importaciones() {
               <button onClick={() => setModalLote(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
               <button onClick={crearLote} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
                 {saving ? 'Guardando...' : 'Crear Lote'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 👇 MODAL DE EDICIÓN */}
+      {editModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900">Editar Lote</h2>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Estado</label>
+                <select 
+                  value={editForm.estado} 
+                  onChange={e => setEditForm({ ...editForm, estado: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="pendiente">Pendiente</option>
+                  <option value="en_transito">En Tránsito</option>
+                  <option value="capitalizado">Capitalizado</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Notas</label>
+                <textarea 
+                  value={editForm.notas} 
+                  onChange={e => setEditForm({ ...editForm, notas: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
+              <button onClick={() => setEditModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
+              <button onClick={guardarEdicion} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                Guardar cambios
               </button>
             </div>
           </div>
