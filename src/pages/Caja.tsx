@@ -10,6 +10,8 @@ export default function Caja() {
   const [movimientos, setMovimientos] = useState<CajaMovimiento[]>([])
   const [loading, setLoading] = useState(true)
   const [modal, setModal] = useState(false)
+  const [editModal, setEditModal] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
   const [tipo, setTipo] = useState<FormTipo>('aporte')
   const [form, setForm] = useState({ cuenta_id: '', cuenta_destino_id: '', concepto: '', monto: 0 })
   const [saving, setSaving] = useState(false)
@@ -61,6 +63,58 @@ export default function Caja() {
     setSaving(false)
   }
 
+  function abrirEditar(movimiento: CajaMovimiento) {
+    setEditId(movimiento.identificacion || movimiento.id)
+    setForm({
+      cuenta_id: movimiento.cuenta_id,
+      cuenta_destino_id: '',
+      concepto: movimiento.concepto,
+      monto: movimiento.monto
+    })
+    setEditModal(true)
+  }
+
+  async function guardarEdicion() {
+    if (!form.cuenta_id || !form.concepto || !form.monto) return alert('Completa todos los campos')
+    if (!editId) return alert('No hay ID de edición')
+    
+    setSaving(true)
+    try {
+      await supabase
+        .from('caja_movimientos')
+        .update({
+          cuenta_id: form.cuenta_id,
+          concepto: form.concepto,
+          monto: form.monto
+        })
+        .eq('identificacion', editId)
+      
+      alert('✅ Actualizado correctamente')
+      setEditModal(false)
+      setEditId(null)
+      setForm(f => ({ ...f, concepto: '', monto: 0 }))
+      load()
+    } catch (e: any) {
+      alert('Error al actualizar: ' + e.message)
+    }
+    setSaving(false)
+  }
+
+  async function handleEliminar(id: string) {
+    if (!confirm('¿Estás seguro de eliminar este movimiento?')) return
+    
+    const { error } = await supabase
+      .from('caja_movimientos')
+      .delete()
+      .eq('identificacion', id)
+
+    if (error) {
+      alert('Error al eliminar')
+    } else {
+      load()
+    }
+  }
+
   const patrimonioBOB = cuentas.filter(c => c.moneda === 'BOB').reduce((s, c) => s + c.saldo, 0)
   const patrimonioUSD = cuentas.filter(c => c.moneda === 'USD').reduce((s, c) => s + c.saldo, 0)
 
@@ -86,7 +140,6 @@ export default function Caja() {
         <button onClick={() => setModal(true)} className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-blue-700 transition">+ Nuevo Movimiento</button>
       </div>
 
-      {/* Cuentas */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {cuentas.map(c => {
           const iconos: Record<string, string> = { efectivo_bs: '💵', banco_bs: '🏦', qr: '📱', caja_usd: '💲' }
@@ -104,7 +157,6 @@ export default function Caja() {
         })}
       </div>
 
-      {/* Historial */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="p-4 border-b border-gray-50 flex items-center justify-between">
           <h2 className="font-semibold text-gray-800">Historial de Movimientos</h2>
@@ -119,10 +171,11 @@ export default function Caja() {
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-left">Tipo</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-left">Concepto</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-right">Monto</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-center">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {movimientos.length === 0 && <tr><td colSpan={5} className="text-center text-gray-400 py-12">Sin movimientos</td></tr>}
+              {movimientos.length === 0 && <tr><td colSpan={6} className="text-center text-gray-400 py-12">Sin movimientos</td></tr>}
               {movimientos.map(m => {
                 const info = tipoLabel[m.tipo] || { label: m.tipo, color: 'text-gray-600' }
                 const esEntrada = ['ingreso', 'aporte', 'transferencia_in'].includes(m.tipo)
@@ -135,6 +188,24 @@ export default function Caja() {
                     <td className={`px-4 py-3 text-right font-semibold ${esEntrada ? 'text-green-600' : 'text-red-500'}`}>
                       {esEntrada ? '+' : '-'}{formatBs(m.monto)}
                     </td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button 
+                          onClick={() => abrirEditar(m)}
+                          className="text-blue-500 hover:text-blue-700 text-xs"
+                          title="Editar"
+                        >
+                          ✏️
+                        </button>
+                        <button 
+                          onClick={() => handleEliminar(m.identificacion || m.id)}
+                          className="text-red-400 hover:text-red-600 text-xs"
+                          title="Eliminar"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 )
               })}
@@ -143,7 +214,6 @@ export default function Caja() {
         </div>
       </div>
 
-      {/* Modal */}
       {modal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -151,9 +221,8 @@ export default function Caja() {
               <h2 className="text-lg font-bold text-gray-900">Nuevo Movimiento</h2>
             </div>
             <div className="p-6 space-y-4">
-              {/* Tipo */}
               <div className="flex bg-gray-100 rounded-lg p-1 text-sm gap-1">
-                {([['aporte', '💰 Aporte'], ['egreso', '💸 Gasto'], ['transferencia', '🔄 Transferencia']] as [FormTipo, string][]).map(([t, l]) => (
+                {([['aporte', '💰 Aporte'], ['egreso', ' Gasto'], ['transferencia', '🔄 Transferencia']] as [FormTipo, string][]).map(([t, l]) => (
                   <button key={t} onClick={() => setTipo(t)}
                     className={`flex-1 py-2 rounded-md font-medium transition ${tipo === t ? 'bg-white shadow text-gray-900' : 'text-gray-500'}`}>{l}</button>
                 ))}
@@ -193,6 +262,42 @@ export default function Caja() {
               <button onClick={() => setModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
               <button onClick={registrar} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
                 {saving ? 'Guardando...' : 'Registrar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {editModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900">Editar Movimiento</h2>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Cuenta</label>
+                <select value={form.cuenta_id} onChange={e => setForm({ ...form, cuenta_id: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                  {cuentas.map(c => <option key={c.id} value={c.id}>{c.nombre} — {c.moneda === 'USD' ? `$${c.saldo.toFixed(2)}` : formatBs(c.saldo)}</option>)}
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Concepto</label>
+                <input value={form.concepto} onChange={e => setForm({ ...form, concepto: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Monto (Bs)</label>
+                <input type="number" value={form.monto} onChange={e => setForm({ ...form, monto: Number(e.target.value) })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
+              <button onClick={() => setEditModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
+              <button onClick={guardarEdicion} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
+                {saving ? 'Guardando...' : 'Actualizar'}
               </button>
             </div>
           </div>
