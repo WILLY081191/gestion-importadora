@@ -74,7 +74,7 @@ export default function Caja() {
     setEditModal(true)
   }
 
-  async function guardarEdicion() {
+  async function guardarEdición() {
     if (!form.cuenta_id || !form.concepto || !form.monto) return alert('Completa todos los campos')
     if (!editId) return alert('No hay ID de edición')
     
@@ -106,7 +106,7 @@ export default function Caja() {
     const { error } = await supabase
       .from('caja_movimientos')
       .delete()
-      .eq('identificacion', id)
+      .eq('identificación', id)
 
     if (error) {
       alert('Error al eliminar')
@@ -296,7 +296,7 @@ export default function Caja() {
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
               <button onClick={() => setEditModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
-              <button onClick={guardarEdicion} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
+              <button onClick={guardarEdición} disabled={saving} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-50">
                 {saving ? 'Guardando...' : 'Actualizar'}
               </button>
             </div>
