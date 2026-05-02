@@ -31,30 +31,30 @@ export default function Caja() {
   }
 
   async function registrar() {
-    if (!form.cuenta_id || !form.concepto || form.monto === '' || form.monto === 0) return alert('Completa todos los campos')
+    const monto = Number(form.monto)
+    if (!form.cuenta_id || !form.concepto || !monto || isNaN(monto)) return alert('Completa todos los campos')
     if (tipo === 'transferencia' && !form.cuenta_destino_id) return alert('Selecciona cuenta destino')
     setSaving(true)
     try {
       const cuenta = cuentas.find(c => c.id === form.cuenta_id)!
-      const montoNum = Number(form.monto)
       if (tipo === 'aporte') {
         await supabase.from('caja_movimientos').insert({
-          cuenta_id: form.cuenta_id, tipo: 'aporte', concepto: form.concepto, monto: montoNum
+          cuenta_id: form.cuenta_id, tipo: 'aporte', concepto: form.concepto, monto
         })
-        await supabase.from('cuentas').update({ saldo: cuenta.saldo + montoNum }).eq('id', form.cuenta_id)
+        await supabase.from('cuentas').update({ saldo: cuenta.saldo + monto }).eq('id', form.cuenta_id)
       } else if (tipo === 'egreso') {
         await supabase.from('caja_movimientos').insert({
-          cuenta_id: form.cuenta_id, tipo: 'egreso', concepto: form.concepto, monto: montoNum
+          cuenta_id: form.cuenta_id, tipo: 'egreso', concepto: form.concepto, monto
         })
-        await supabase.from('cuentas').update({ saldo: cuenta.saldo - montoNum }).eq('id', form.cuenta_id)
+        await supabase.from('cuentas').update({ saldo: cuenta.saldo - monto }).eq('id', form.cuenta_id)
       } else {
         const destino = cuentas.find(c => c.id === form.cuenta_destino_id)!
         await supabase.from('caja_movimientos').insert([
-          { cuenta_id: form.cuenta_id, tipo: 'transferencia_out', concepto: `Transferencia → ${destino.nombre}`, monto: montoNum },
-          { cuenta_id: form.cuenta_destino_id, tipo: 'transferencia_in', concepto: `Transferencia ← ${cuenta.nombre}`, monto: montoNum }
+          { cuenta_id: form.cuenta_id, tipo: 'transferencia_out', concepto: `Transferencia → ${destino.nombre}`, monto },
+          { cuenta_id: form.cuenta_destino_id, tipo: 'transferencia_in', concepto: `Transferencia ← ${cuenta.nombre}`, monto }
         ])
-        await supabase.from('cuentas').update({ saldo: cuenta.saldo - montoNum }).eq('id', form.cuenta_id)
-        await supabase.from('cuentas').update({ saldo: destino.saldo + montoNum }).eq('id', form.cuenta_destino_id)
+        await supabase.from('cuentas').update({ saldo: cuenta.saldo - monto }).eq('id', form.cuenta_id)
+        await supabase.from('cuentas').update({ saldo: destino.saldo + monto }).eq('id', form.cuenta_destino_id)
       }
       alert('✅ Registrado correctamente')
       setModal(false)
@@ -70,13 +70,14 @@ export default function Caja() {
       cuenta_id: movimiento.cuenta_id,
       cuenta_destino_id: '',
       concepto: movimiento.concepto,
-      monto: movimiento.monto.toString()
+      monto: String(movimiento.monto)
     })
     setEditModal(true)
   }
 
   async function guardarEdicion() {
-    if (!form.cuenta_id || !form.concepto || form.monto === '' || form.monto === 0) return alert('Completa todos los campos')
+    const monto = Number(form.monto)
+    if (!form.cuenta_id || !form.concepto || !monto || isNaN(monto)) return alert('Completa todos los campos')
     if (!editMovimiento) return alert('No hay movimiento seleccionado')
 
     setSaving(true)
@@ -85,7 +86,6 @@ export default function Caja() {
       const tipoMov = editMovimiento.tipo
       const cuentaAnterior = cuentas.find(c => c.id === editMovimiento.cuenta_id)!
       const cuentaNueva = cuentas.find(c => c.id === form.cuenta_id)!
-      const montoNuevo = Number(form.monto)
 
       const esEntradaAnterior = ['ingreso', 'aporte', 'transferencia_in'].includes(tipoMov)
       const saldoRevertido = esEntradaAnterior
@@ -94,27 +94,19 @@ export default function Caja() {
 
       const { error } = await supabase
         .from('caja_movimientos')
-        .update({
-          cuenta_id: form.cuenta_id,
-          concepto: form.concepto,
-          monto: montoNuevo
-        })
+        .update({ cuenta_id: form.cuenta_id, concepto: form.concepto, monto })
         .eq('id', editMovimiento.id)
 
       if (error) throw error
 
       if (cuentaAnterior.id === cuentaNueva.id) {
         const esEntrada = ['ingreso', 'aporte', 'transferencia_in'].includes(tipoMov)
-        const saldoFinal = esEntrada
-          ? saldoRevertido + montoNuevo
-          : saldoRevertido - montoNuevo
+        const saldoFinal = esEntrada ? saldoRevertido + monto : saldoRevertido - monto
         await supabase.from('cuentas').update({ saldo: saldoFinal }).eq('id', cuentaNueva.id)
       } else {
         await supabase.from('cuentas').update({ saldo: saldoRevertido }).eq('id', cuentaAnterior.id)
         const esEntrada = ['ingreso', 'aporte', 'transferencia_in'].includes(tipoMov)
-        const saldoNuevo = esEntrada
-          ? cuentaNueva.saldo + montoNuevo
-          : cuentaNueva.saldo - montoNuevo
+        const saldoNuevo = esEntrada ? cuentaNueva.saldo + monto : cuentaNueva.saldo - monto
         await supabase.from('cuentas').update({ saldo: saldoNuevo }).eq('id', cuentaNueva.id)
       }
 
@@ -165,6 +157,20 @@ export default function Caja() {
     transferencia_in: { label: 'Entrada', color: 'text-teal-600' },
     transferencia_out: { label: 'Salida', color: 'text-orange-500' },
   }
+
+  // Input de monto reutilizable — maneja string internamente, solo permite dígitos y un punto decimal
+  const inputMonto = (
+    <input
+      value={form.monto}
+      onChange={e => {
+        const val = e.target.value
+        if (val === '' || /^\d*\.?\d*$/.test(val)) setForm({ ...form, monto: val })
+      }}
+      placeholder="0.00"
+      inputMode="decimal"
+      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    />
+  )
 
   if (loading) return <div className="flex justify-center py-16"><div className="animate-spin w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full" /></div>
 
@@ -254,6 +260,7 @@ export default function Caja() {
         </div>
       </div>
 
+      {/* Modal Nuevo Movimiento */}
       {modal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -292,15 +299,10 @@ export default function Caja() {
                 <input value={form.concepto} onChange={e => setForm({ ...form, concepto: e.target.value })} placeholder="Ej: Pago proveedor, capital inicial..."
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
+
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Monto (Bs)</label>
-                <input 
-                  type="number" 
-                  step="any"
-                  value={form.monto} 
-                  onChange={e => setForm({ ...form, monto: e.target.value === '' ? '' : Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                />
+                {inputMonto}
               </div>
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
@@ -313,6 +315,7 @@ export default function Caja() {
         </div>
       )}
 
+      {/* Modal Editar Movimiento */}
       {editModal && editMovimiento && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -333,15 +336,10 @@ export default function Caja() {
                 <input value={form.concepto} onChange={e => setForm({ ...form, concepto: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
+
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Monto (Bs)</label>
-                <input 
-                  type="number" 
-                  step="any"
-                  value={form.monto} 
-                  onChange={e => setForm({ ...form, monto: e.target.value === '' ? '' : Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
-                />
+                {inputMonto}
               </div>
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
