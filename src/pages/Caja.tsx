@@ -13,7 +13,7 @@ export default function Caja() {
   const [editModal, setEditModal] = useState(false)
   const [editMovimiento, setEditMovimiento] = useState<CajaMovimiento | null>(null)
   const [tipo, setTipo] = useState<FormTipo>('aporte')
-  const [form, setForm] = useState({ cuenta_id: '', cuenta_destino_id: '', concepto: '', monto: 0 })
+  const [form, setForm] = useState({ cuenta_id: '', cuenta_destino_id: '', concepto: '', monto: '' })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => { load() }, [])
@@ -31,52 +31,52 @@ export default function Caja() {
   }
 
   async function registrar() {
-    if (!form.cuenta_id || !form.concepto || !form.monto) return alert('Completa todos los campos')
+    if (!form.cuenta_id || !form.concepto || form.monto === '' || form.monto === 0) return alert('Completa todos los campos')
     if (tipo === 'transferencia' && !form.cuenta_destino_id) return alert('Selecciona cuenta destino')
     setSaving(true)
     try {
       const cuenta = cuentas.find(c => c.id === form.cuenta_id)!
+      const montoNum = Number(form.monto)
       if (tipo === 'aporte') {
         await supabase.from('caja_movimientos').insert({
-          cuenta_id: form.cuenta_id, tipo: 'aporte', concepto: form.concepto, monto: form.monto
+          cuenta_id: form.cuenta_id, tipo: 'aporte', concepto: form.concepto, monto: montoNum
         })
-        await supabase.from('cuentas').update({ saldo: cuenta.saldo + form.monto }).eq('id', form.cuenta_id)
+        await supabase.from('cuentas').update({ saldo: cuenta.saldo + montoNum }).eq('id', form.cuenta_id)
       } else if (tipo === 'egreso') {
         await supabase.from('caja_movimientos').insert({
-          cuenta_id: form.cuenta_id, tipo: 'egreso', concepto: form.concepto, monto: form.monto
+          cuenta_id: form.cuenta_id, tipo: 'egreso', concepto: form.concepto, monto: montoNum
         })
-        await supabase.from('cuentas').update({ saldo: cuenta.saldo - form.monto }).eq('id', form.cuenta_id)
+        await supabase.from('cuentas').update({ saldo: cuenta.saldo - montoNum }).eq('id', form.cuenta_id)
       } else {
         const destino = cuentas.find(c => c.id === form.cuenta_destino_id)!
         await supabase.from('caja_movimientos').insert([
-          { cuenta_id: form.cuenta_id, tipo: 'transferencia_out', concepto: `Transferencia → ${destino.nombre}`, monto: form.monto },
-          { cuenta_id: form.cuenta_destino_id, tipo: 'transferencia_in', concepto: `Transferencia ← ${cuenta.nombre}`, monto: form.monto }
+          { cuenta_id: form.cuenta_id, tipo: 'transferencia_out', concepto: `Transferencia → ${destino.nombre}`, monto: montoNum },
+          { cuenta_id: form.cuenta_destino_id, tipo: 'transferencia_in', concepto: `Transferencia ← ${cuenta.nombre}`, monto: montoNum }
         ])
-        await supabase.from('cuentas').update({ saldo: cuenta.saldo - form.monto }).eq('id', form.cuenta_id)
-        await supabase.from('cuentas').update({ saldo: destino.saldo + form.monto }).eq('id', form.cuenta_destino_id)
+        await supabase.from('cuentas').update({ saldo: cuenta.saldo - montoNum }).eq('id', form.cuenta_id)
+        await supabase.from('cuentas').update({ saldo: destino.saldo + montoNum }).eq('id', form.cuenta_destino_id)
       }
       alert('✅ Registrado correctamente')
       setModal(false)
-      setForm(f => ({ ...f, concepto: '', monto: 0 }))
+      setForm(f => ({ ...f, concepto: '', monto: '' }))
       load()
     } catch (e: any) { alert('Error: ' + e.message) }
     setSaving(false)
   }
 
   function abrirEditar(movimiento: CajaMovimiento) {
-    // Guardamos el movimiento completo para poder revertir el saldo luego
     setEditMovimiento(movimiento)
     setForm({
       cuenta_id: movimiento.cuenta_id,
       cuenta_destino_id: '',
       concepto: movimiento.concepto,
-      monto: movimiento.monto
+      monto: movimiento.monto.toString()
     })
     setEditModal(true)
   }
 
   async function guardarEdicion() {
-    if (!form.cuenta_id || !form.concepto || !form.monto) return alert('Completa todos los campos')
+    if (!form.cuenta_id || !form.concepto || form.monto === '' || form.monto === 0) return alert('Completa todos los campos')
     if (!editMovimiento) return alert('No hay movimiento seleccionado')
 
     setSaving(true)
@@ -85,47 +85,43 @@ export default function Caja() {
       const tipoMov = editMovimiento.tipo
       const cuentaAnterior = cuentas.find(c => c.id === editMovimiento.cuenta_id)!
       const cuentaNueva = cuentas.find(c => c.id === form.cuenta_id)!
+      const montoNuevo = Number(form.monto)
 
-      // 1. Revertir el efecto del movimiento anterior en el saldo
       const esEntradaAnterior = ['ingreso', 'aporte', 'transferencia_in'].includes(tipoMov)
       const saldoRevertido = esEntradaAnterior
         ? cuentaAnterior.saldo - montoAnterior
         : cuentaAnterior.saldo + montoAnterior
 
-      // 2. Actualizar el movimiento
       const { error } = await supabase
         .from('caja_movimientos')
         .update({
           cuenta_id: form.cuenta_id,
           concepto: form.concepto,
-          monto: form.monto
+          monto: montoNuevo
         })
-        .eq('id', editMovimiento.id)  // ✅ Usando el id correcto
+        .eq('id', editMovimiento.id)
 
       if (error) throw error
 
-      // 3. Aplicar el nuevo monto al saldo
       if (cuentaAnterior.id === cuentaNueva.id) {
-        // Misma cuenta: revertir y aplicar nuevo monto
         const esEntrada = ['ingreso', 'aporte', 'transferencia_in'].includes(tipoMov)
         const saldoFinal = esEntrada
-          ? saldoRevertido + form.monto
-          : saldoRevertido - form.monto
+          ? saldoRevertido + montoNuevo
+          : saldoRevertido - montoNuevo
         await supabase.from('cuentas').update({ saldo: saldoFinal }).eq('id', cuentaNueva.id)
       } else {
-        // Cuenta cambió: revertir en la antigua y aplicar en la nueva
         await supabase.from('cuentas').update({ saldo: saldoRevertido }).eq('id', cuentaAnterior.id)
         const esEntrada = ['ingreso', 'aporte', 'transferencia_in'].includes(tipoMov)
         const saldoNuevo = esEntrada
-          ? cuentaNueva.saldo + form.monto
-          : cuentaNueva.saldo - form.monto
+          ? cuentaNueva.saldo + montoNuevo
+          : cuentaNueva.saldo - montoNuevo
         await supabase.from('cuentas').update({ saldo: saldoNuevo }).eq('id', cuentaNueva.id)
       }
 
       alert('✅ Actualizado correctamente')
       setEditModal(false)
       setEditMovimiento(null)
-      setForm(f => ({ ...f, concepto: '', monto: 0 }))
+      setForm(f => ({ ...f, concepto: '', monto: '' }))
       load()
     } catch (e: any) {
       alert('Error al actualizar: ' + e.message)
@@ -137,7 +133,6 @@ export default function Caja() {
     if (!confirm('¿Estás seguro de eliminar este movimiento?')) return
 
     try {
-      // 1. Revertir el saldo antes de eliminar
       const cuenta = cuentas.find(c => c.id === movimiento.cuenta_id)
       if (cuenta) {
         const esEntrada = ['ingreso', 'aporte', 'transferencia_in'].includes(movimiento.tipo)
@@ -147,7 +142,6 @@ export default function Caja() {
         await supabase.from('cuentas').update({ saldo: saldoRevertido }).eq('id', cuenta.id)
       }
 
-      // 2. Eliminar el movimiento usando el id correcto ✅
       const { error } = await supabase
         .from('caja_movimientos')
         .delete()
@@ -244,7 +238,7 @@ export default function Caja() {
                           ✏️
                         </button>
                         <button
-                          onClick={() => handleEliminar(m)}  // ✅ Pasamos el movimiento completo
+                          onClick={() => handleEliminar(m)}
                           className="text-red-400 hover:text-red-600 text-xs"
                           title="Eliminar"
                         >
@@ -300,8 +294,13 @@ export default function Caja() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Monto (Bs)</label>
-                <input type="number" value={form.monto} onChange={e => setForm({ ...form, monto: Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input 
+                  type="number" 
+                  step="any"
+                  value={form.monto} 
+                  onChange={e => setForm({ ...form, monto: e.target.value === '' ? '' : Number(e.target.value) })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                />
               </div>
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
@@ -336,8 +335,13 @@ export default function Caja() {
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Monto (Bs)</label>
-                <input type="number" value={form.monto} onChange={e => setForm({ ...form, monto: Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <input 
+                  type="number" 
+                  step="any"
+                  value={form.monto} 
+                  onChange={e => setForm({ ...form, monto: e.target.value === '' ? '' : Number(e.target.value) })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" 
+                />
               </div>
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
