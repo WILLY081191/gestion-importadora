@@ -16,6 +16,11 @@ export default function Ventas() {
   const [tab, setTab] = useState<'pos' | 'historial'>('pos')
   const [ventas, setVentas] = useState<any[]>([])
   const [loadingH, setLoadingH] = useState(false)
+  
+  // 👇 NUEVOS ESTADOS PARA EDICIÓN
+  const [editModal, setEditModal] = useState(false)
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({ notas: '', total_bs: 0 })
 
   useEffect(() => { loadBase() }, [])
 
@@ -71,7 +76,6 @@ export default function Ventas() {
     if (!carrito.length) return alert('El carrito está vacío')
     if (!vendedorId || !cuentaId) return alert('Selecciona vendedor y cuenta')
 
-    // Validar stock
     for (const item of carrito) {
       if (item.cantidad > item.producto.stock_actual) {
         return alert(`Stock insuficiente para ${item.producto.nombre}. Disponible: ${item.producto.stock_actual}`)
@@ -80,7 +84,6 @@ export default function Ventas() {
 
     setProcessing(true)
     try {
-      // 1. Crear venta
       const { data: venta, error: ve } = await supabase.from('ventas').insert({
         vendedor_id: vendedorId,
         cuenta_id: cuentaId,
@@ -91,7 +94,6 @@ export default function Ventas() {
       }).select().single()
       if (ve) throw ve
 
-      // 2. Insertar items
       await supabase.from('venta_items').insert(
         carrito.map(i => ({
           venta_id: venta.id,
@@ -102,14 +104,12 @@ export default function Ventas() {
         }))
       )
 
-      // 3. Actualizar stock
       for (const item of carrito) {
         await supabase.from('productos').update({
           stock_actual: item.producto.stock_actual - item.cantidad
         }).eq('id', item.producto.id)
       }
 
-      // 4. Movimiento de caja
       await supabase.from('caja_movimientos').insert({
         cuenta_id: cuentaId,
         tipo: 'ingreso',
@@ -119,13 +119,11 @@ export default function Ventas() {
         referencia_tipo: 'venta'
       })
 
-      // 5. Actualizar saldo cuenta
       const cuenta = cuentas.find(c => c.id === cuentaId)
       if (cuenta) {
         await supabase.from('cuentas').update({ saldo: cuenta.saldo + total }).eq('id', cuentaId)
       }
 
-      // 6. Registrar comisión si aplica
       if (comision > 0) {
         await supabase.from('comisiones').insert({
           venta_id: venta.id,
@@ -143,6 +141,80 @@ export default function Ventas() {
       alert('Error: ' + e.message)
     }
     setProcessing(false)
+  }
+
+  // 👇 FUNCIÓN: ABRIR EDICIÓN
+  function abrirEditar(venta: any) {
+    setEditId(venta.id)
+    setEditForm({
+      notas: venta.notas || '',
+      total_bs: venta.total_bs
+    })
+    setEditModal(true)
+  }
+
+  // 👇 FUNCIÓN: GUARDAR EDICIÓN (solo notas por seguridad)
+  async function guardarEdicion() {
+    if (!editId) return alert('Error: No hay venta seleccionada')
+    
+    try {
+      await supabase
+        .from('ventas')
+        .update({ notas: editForm.notas })
+        .eq('id', editId)
+      
+      alert('✅ Notas actualizadas')
+      setEditModal(false)
+      setEditId(null)
+      loadHistorial()
+    } catch (e: any) {
+      alert('Error: ' + e.message)
+    }
+  }
+
+  // 👇 FUNCIÓN: ELIMINAR VENTA (con reversión básica)
+  async function handleEliminarVenta(id: string) {
+    if (!confirm('⚠️ ¿Estás SEGURO de eliminar esta venta?\n\nEsto revertirá:\n- El stock de los productos\n- El movimiento de caja\n- La comisión del vendedor')) return
+    
+    try {
+      // 1. Obtener datos de la venta para revertir
+      const { data: venta } = await supabase.from('ventas').select('*, venta_items(*)').eq('id', id).single()
+      if (!venta) throw new Error('Venta no encontrada')
+
+      // 2. Revertir stock de productos
+      for (const item of venta.venta_items) {
+        await supabase.from('productos').update({
+          stock_actual: (item.productos as any)?.stock_actual + item.cantidad
+        }).eq('id', item.producto_id)
+      }
+
+      // 3. Eliminar items de la venta
+      await supabase.from('venta_items').delete().eq('venta_id', id)
+
+      // 4. Eliminar movimiento de caja relacionado
+      await supabase.from('caja_movimientos').delete()
+        .eq('referencia_id', id).eq('referencia_tipo', 'venta')
+
+      // 5. Eliminar comisión si existe
+      await supabase.from('comisiones').delete().eq('venta_id', id)
+
+      // 6. Eliminar la venta
+      await supabase.from('ventas').delete().eq('id', id)
+
+      // 7. Revertir saldo de la cuenta
+      const cuenta = cuentas.find(c => c.id === venta.cuenta_id)
+      if (cuenta) {
+        await supabase.from('cuentas').update({ 
+          saldo: cuenta.saldo - venta.total_bs 
+        }).eq('id', venta.cuenta_id)
+      }
+
+      alert('✅ Venta eliminada y datos revertidos')
+      loadHistorial()
+      loadBase()
+    } catch (e: any) {
+      alert('Error al eliminar: ' + e.message)
+    }
   }
 
   return (
@@ -253,10 +325,11 @@ export default function Ventas() {
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-right">Total</th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-right">Ganancia</th>
                   <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-right">Comisión</th>
+                  <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
-                {ventas.length === 0 && <tr><td colSpan={6} className="text-center text-gray-400 py-12">No hay ventas aún</td></tr>}
+                {ventas.length === 0 && <tr><td colSpan={7} className="text-center text-gray-400 py-12">No hay ventas aún</td></tr>}
                 {ventas.map(v => (
                   <tr key={v.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 text-gray-600">{new Date(v.fecha).toLocaleString('es-BO')}</td>
@@ -265,11 +338,57 @@ export default function Ventas() {
                     <td className="px-4 py-3 text-right font-semibold text-blue-700">{formatBs(v.total_bs)}</td>
                     <td className="px-4 py-3 text-right font-semibold text-green-600">{formatBs(v.ganancia_bs)}</td>
                     <td className="px-4 py-3 text-right text-amber-600">{formatBs(v.comision_bs)}</td>
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-center gap-2">
+                        <button 
+                          onClick={() => abrirEditar(v)}
+                          className="text-blue-500 hover:text-blue-700 text-xs"
+                          title="Editar notas"
+                        >
+                          ✏️
+                        </button>
+                        <button 
+                          onClick={() => handleEliminarVenta(v.id)}
+                          className="text-red-400 hover:text-red-600 text-xs"
+                          title="Eliminar venta"
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {/* 👇 MODAL DE EDICIÓN */}
+      {editModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="p-6 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900">Editar Venta</h2>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Notas</label>
+                <textarea 
+                  value={editForm.notas} 
+                  onChange={e => setEditForm({ ...editForm, notas: e.target.value })}
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                />
+              </div>
+            </div>
+            <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
+              <button onClick={() => setEditModal(false)} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Cancelar</button>
+              <button onClick={guardarEdicion} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
+                Guardar cambios
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
