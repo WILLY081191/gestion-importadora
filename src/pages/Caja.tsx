@@ -64,7 +64,7 @@ export default function Caja() {
   }
 
   function abrirEditar(movimiento: CajaMovimiento) {
-    setEditId(movimiento.identificacion || movimiento.id)
+    setEditId((movimiento as any).identificacion || movimiento.id)
     setForm({
       cuenta_id: movimiento.cuenta_id,
       cuenta_destino_id: '',
@@ -198,7 +198,7 @@ export default function Caja() {
                           ✏️
                         </button>
                         <button 
-                          onClick={() => handleEliminar(m.identificacion || m.id)}
+                          nClick={() => handleEliminar((m as any).identificacion || m.id)}
                           className="text-red-400 hover:text-red-600 text-xs"
                           title="Eliminar"
                         >
