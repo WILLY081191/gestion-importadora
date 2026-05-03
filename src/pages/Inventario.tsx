@@ -3,9 +3,40 @@ import { supabase } from '../lib/supabase'
 import { formatBs } from '../lib/utils'
 import type { Producto } from '../lib/types'
 
-const empty: Omit<Producto, 'id' | 'created_at' | 'activo'> = {
-  sku: '', nombre: '', marca: '', categoria: '',
-  stock_actual: 0, stock_minimo: 0, costo_promedio_bs: 0, precio_venta_bs: 0
+// Campos de texto del formulario (no numéricos)
+interface FormText {
+  sku: string
+  nombre: string
+  marca: string
+  categoria: string
+}
+
+// Campos numéricos como string para evitar el bug del 0
+interface FormNums {
+  stock_actual: string
+  stock_minimo: string
+  costo_promedio_bs: string
+  precio_venta_bs: string
+}
+
+const emptyText: FormText = { sku: '', nombre: '', marca: '', categoria: '' }
+const emptyNums: FormNums = { stock_actual: '', stock_minimo: '', costo_promedio_bs: '', precio_venta_bs: '' }
+
+function numStr(s: string) { return parseFloat(s) || 0 }
+
+function NumInput({ value, onChange, placeholder = '0' }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <input
+      value={value}
+      onChange={e => {
+        const val = e.target.value
+        if (val === '' || /^\d*\.?\d*$/.test(val)) onChange(val)
+      }}
+      placeholder={placeholder}
+      inputMode="decimal"
+      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+    />
+  )
 }
 
 export default function Inventario() {
@@ -13,7 +44,8 @@ export default function Inventario() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [modal, setModal] = useState(false)
-  const [form, setForm] = useState({ ...empty })
+  const [formText, setFormText] = useState<FormText>({ ...emptyText })
+  const [formNums, setFormNums] = useState<FormNums>({ ...emptyNums })
   const [editId, setEditId] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -33,26 +65,38 @@ export default function Inventario() {
   )
 
   function openNew() {
-    setForm({ ...empty })
+    setFormText({ ...emptyText })
+    setFormNums({ ...emptyNums })
     setEditId(null)
     setModal(true)
   }
 
   function openEdit(p: Producto) {
-    setForm({ sku: p.sku, nombre: p.nombre, marca: p.marca, categoria: p.categoria,
-      stock_actual: p.stock_actual, stock_minimo: p.stock_minimo,
-      costo_promedio_bs: p.costo_promedio_bs, precio_venta_bs: p.precio_venta_bs })
+    setFormText({ sku: p.sku, nombre: p.nombre, marca: p.marca, categoria: p.categoria })
+    setFormNums({
+      stock_actual: String(p.stock_actual),
+      stock_minimo: String(p.stock_minimo),
+      costo_promedio_bs: String(p.costo_promedio_bs),
+      precio_venta_bs: String(p.precio_venta_bs)
+    })
     setEditId(p.id)
     setModal(true)
   }
 
   async function save() {
-    if (!form.sku || !form.nombre) return alert('SKU y Nombre son obligatorios')
+    if (!formText.sku || !formText.nombre) return alert('SKU y Nombre son obligatorios')
     setSaving(true)
+    const payload = {
+      ...formText,
+      stock_actual: numStr(formNums.stock_actual),
+      stock_minimo: numStr(formNums.stock_minimo),
+      costo_promedio_bs: numStr(formNums.costo_promedio_bs),
+      precio_venta_bs: numStr(formNums.precio_venta_bs)
+    }
     if (editId) {
-      await supabase.from('productos').update(form).eq('id', editId)
+      await supabase.from('productos').update(payload).eq('id', editId)
     } else {
-      await supabase.from('productos').insert({ ...form, activo: true })
+      await supabase.from('productos').insert({ ...payload, activo: true })
     }
     setSaving(false)
     setModal(false)
@@ -143,43 +187,39 @@ export default function Inventario() {
             <div className="p-6 grid grid-cols-2 gap-4">
               <div className="col-span-1">
                 <label className="text-xs font-medium text-gray-600 block mb-1">SKU *</label>
-                <input value={form.sku} onChange={e => setForm({ ...form, sku: e.target.value })}
+                <input value={formText.sku} onChange={e => setFormText({ ...formText, sku: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="col-span-1">
                 <label className="text-xs font-medium text-gray-600 block mb-1">Marca</label>
-                <input value={form.marca} onChange={e => setForm({ ...form, marca: e.target.value })}
+                <input value={formText.marca} onChange={e => setFormText({ ...formText, marca: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="col-span-2">
                 <label className="text-xs font-medium text-gray-600 block mb-1">Nombre *</label>
-                <input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })}
+                <input value={formText.nombre} onChange={e => setFormText({ ...formText, nombre: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="col-span-2">
                 <label className="text-xs font-medium text-gray-600 block mb-1">Categoría</label>
-                <input value={form.categoria} onChange={e => setForm({ ...form, categoria: e.target.value })}
+                <input value={formText.categoria} onChange={e => setFormText({ ...formText, categoria: e.target.value })}
                   className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Stock Actual</label>
-                <input type="number" value={form.stock_actual} onChange={e => setForm({ ...form, stock_actual: Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <NumInput value={formNums.stock_actual} onChange={v => setFormNums({ ...formNums, stock_actual: v })} />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Stock Mínimo</label>
-                <input type="number" value={form.stock_minimo} onChange={e => setForm({ ...form, stock_minimo: Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <NumInput value={formNums.stock_minimo} onChange={v => setFormNums({ ...formNums, stock_minimo: v })} />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Costo Promedio (Bs)</label>
-                <input type="number" value={form.costo_promedio_bs} onChange={e => setForm({ ...form, costo_promedio_bs: Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <NumInput value={formNums.costo_promedio_bs} onChange={v => setFormNums({ ...formNums, costo_promedio_bs: v })} placeholder="0.00" />
               </div>
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Precio de Venta (Bs)</label>
-                <input type="number" value={form.precio_venta_bs} onChange={e => setForm({ ...form, precio_venta_bs: Number(e.target.value) })}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                <NumInput value={formNums.precio_venta_bs} onChange={v => setFormNums({ ...formNums, precio_venta_bs: v })} placeholder="0.00" />
               </div>
             </div>
             <div className="p-6 border-t border-gray-100 flex justify-end gap-3">
